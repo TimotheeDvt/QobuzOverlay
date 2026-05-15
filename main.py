@@ -4,7 +4,7 @@ import psutil
 import ctypes
 import requests
 from ctypes import wintypes
-from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLabel
+from PyQt6.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QLayout
 from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QPixmap
 from qasync import QEventLoop
@@ -14,16 +14,20 @@ class QobuzPureDisplay(QWidget):
         super().__init__()
         self.current_track = ""
         self.resizing = False
+        self.resize_edge = None
+        self.current_pixmap = None
         self.initUI()
         self.oldPos = self.pos()
 
     def initUI(self):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        
+
+        self.setMouseTracking(True)
         self.base_width = 220
-        self.base_height = 290
+        self.base_height = 286
         self.resize(self.base_width, self.base_height)
+        self.setMinimumSize(160, 208)
 
         self.setStyleSheet("""
             QWidget#MainFrame {
@@ -45,10 +49,13 @@ class QobuzPureDisplay(QWidget):
 
         self.main_layout = QVBoxLayout()
         self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
         self.container = QWidget()
         self.container.setObjectName("MainFrame")
+        self.container.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.container_layout = QVBoxLayout(self.container)
         self.container_layout.setContentsMargins(10, 10, 10, 10)
+        self.container_layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
 
         # 1. Album Cover
         self.cover_label = QLabel()
@@ -90,27 +97,80 @@ class QobuzPureDisplay(QWidget):
 
     def leaveEvent(self, event):
         self.close_btn.hide()
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def get_resize_edge(self, pos):
+        x, y = pos.x(), pos.y()
+        margin = 15
+        edge = ""
+
+        if y < margin: edge += "top"
+        elif y > self.height() - margin: edge += "bottom"
+
+        if x < margin: edge += "_left" if edge else "left"
+        elif x > self.width() - margin: edge += "_right" if edge else "right"
+
+        return edge or None
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            if (self.width() - event.position().x() < 20) and (self.height() - event.position().y() < 20):
+            self.resize_edge = self.get_resize_edge(event.position())
+            if self.resize_edge:
                 self.resizing = True
+                self._resize_start_pos = event.globalPosition().toPoint()
+                self._resize_start_geometry = self.geometry()
             else:
                 self.resizing = False
                 self.oldPos = event.globalPosition().toPoint()
 
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.resizing = False
+            self.resize_edge = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
     def mouseMoveEvent(self, event):
-        if self.resizing:
-            nw = max(160, int(event.position().x()))
-            nh = int(nw * 1.3)
-            self.setMinimumSize(nw, nh)
-            self.setMaximumSize(nw, nh)
-            self.resize(nw, nh)
-            self.close_btn.move(self.width() - 25, 5)
+        pos = event.position()
+        if not self.resizing:
+            if event.buttons() == Qt.MouseButton.NoButton:
+                edge = self.get_resize_edge(pos)
+                if edge in ["top_left", "bottom_right"]: self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+                elif edge in ["top_right", "bottom_left"]: self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+                elif edge in ["left", "right"]: self.setCursor(Qt.CursorShape.SizeHorCursor)
+                elif edge in ["top", "bottom"]: self.setCursor(Qt.CursorShape.SizeVerCursor)
+                else: self.setCursor(Qt.CursorShape.ArrowCursor)
+            elif event.buttons() == Qt.MouseButton.LeftButton and hasattr(self, 'oldPos'):
+                delta = event.globalPosition().toPoint() - self.oldPos
+                self.move(self.x() + delta.x(), self.y() + delta.y())
+                self.oldPos = event.globalPosition().toPoint()
         else:
-            delta = QPoint(event.globalPosition().toPoint() - self.oldPos)
-            self.move(self.x() + delta.x(), self.y() + delta.y())
-            self.oldPos = event.globalPosition().toPoint()
+            delta = event.globalPosition().toPoint() - self._resize_start_pos
+            geom = self._resize_start_geometry
+            nx, ny, nw, nh = geom.x(), geom.y(), geom.width(), geom.height()
+
+            if "left" in self.resize_edge: nw = geom.width() - delta.x()
+            elif "right" in self.resize_edge: nw = geom.width() + delta.x()
+
+            if "top" in self.resize_edge: nh = geom.height() - delta.y()
+            elif "bottom" in self.resize_edge: nh = geom.height() + delta.y()
+
+            # Forcer le ratio 1:1.3 selon le bord tiré
+            if self.resize_edge in ["top", "bottom"]: nw = int(nh / 1.3)
+            else: nh = int(nw * 1.3)
+
+            if nw < 160: nw = 160; nh = 208
+            elif nh < 208: nh = 208; nw = 160
+
+            if "left" in self.resize_edge: nx = geom.x() + geom.width() - nw
+            if "top" in self.resize_edge: ny = geom.y() + geom.height() - nh
+
+            self.setGeometry(nx, ny, nw, nh)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.close_btn.move(self.width() - 25, 5)
+        if self.current_pixmap:
+            self.set_cover(self.current_pixmap)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -133,7 +193,7 @@ class QobuzPureDisplay(QWidget):
         return None
 
     def get_qobuz_window(self):
-        qobuz_pids = {p.info['pid'] for p in psutil.process_iter(['name', 'pid']) 
+        qobuz_pids = {p.info['pid'] for p in psutil.process_iter(['name', 'pid'])
                       if p.info['name'] and p.info['name'].lower() == 'qobuz.exe'}
         if not qobuz_pids: return None
         found_title = None
@@ -168,12 +228,15 @@ class QobuzPureDisplay(QWidget):
             self.track_label.setText(track)
             self.artist_label.setText(artist)
             pixmap = await self.fetch_cover_api(track, artist)
-            if pixmap: self.set_cover(pixmap)
+            if pixmap:
+                self.current_pixmap = pixmap
+                self.set_cover(pixmap)
         elif not title:
             self.track_label.setText("Qobuz Idle")
             self.artist_label.setText("-")
             self.cover_label.clear()
             self.current_track = ""
+            self.current_pixmap = None
 
     def set_cover(self, pixmap):
         size = self.width() - 20
