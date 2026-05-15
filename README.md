@@ -13,7 +13,7 @@ A lightweight, "always-on-top" desktop overlay for the Qobuz music player on Win
 
 ## Requirements
 
-This application is designed for **Windows only** due to its use of the Windows API for process and window detection.
+This application is designed for Windows, but is now **Linux compatible** using `wmctrl` for X11/XWayland environments.
 
 You will need Python 3.x installed. The project depends on the following Python libraries:
 
@@ -21,6 +21,8 @@ You will need Python 3.x installed. The project depends on the following Python 
 -   `qasync`: To run an asyncio event loop within a PyQt6 application.
 -   `psutil`: To find the Qobuz process and its ID.
 -   `requests`: To fetch album art from the web API.
+
+**Linux Only:** You must install `wmctrl` via your distribution's package manager (e.g., `sudo apt install wmctrl`).
 
 You can install all dependencies using the provided `requirements.txt` file.
 
@@ -38,20 +40,22 @@ You can install all dependencies using the provided `requirements.txt` file.
     python main.py
     ```
 
-## Building a Standalone Executable (.EXE)
+## Building a Standalone Executable
 
-You can compile the script into a single, standalone executable file (`.exe`) using `PyInstaller`.
+You can compile the script into a single, standalone executable file using `PyInstaller` (works on both Windows and Linux).
 
 1.  First, ensure PyInstaller is installed:
     ```bash
     pip install pyinstaller
     ```
-2.  From the project's root directory, run the following build command:
+2.  From the project's root directory, run the following build command depending on your OS:
+
+    **Windows or Linux:**
     ```bash
     python -m PyInstaller --noconsole --onefile --name "QobuzOverlay" main.py
     ```
-    -   `--noconsole`: Prevents a command prompt window from opening when the `.exe` is run.
+    -   `--noconsole`: Prevents a command prompt window from opening when the executable is run.
     -   `--onefile`: Bundles everything into a single executable file.
     -   `--name "QobuzOverlay"`: Sets the name of the final executable.
 
-3.  The final `QobuzOverlay.exe` will be located in a new `dist` folder.
+3.  The final executable (`QobuzOverlay.exe` on Windows, or just `QobuzOverlay` on Linux) will be located in a new `dist` folder.
